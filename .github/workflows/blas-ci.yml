@@ -25,10 +25,12 @@ jobs:
       run: |
         cd TestBlas
         make all
+        chmod +x tests/main_test
         make run
     
     - name: Test performance
       run: |
         cd GemmTrpo
         make all
+        chmod +x lab6
         make run
