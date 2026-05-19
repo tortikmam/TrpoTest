@@ -1,0 +1,117 @@
+name: BLAS CI Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  # JOB 1: Interface Tests (проверка всех BLAS функций)
+  interface-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y g++ make gfortran
+    
+    - name: Build OpenBLAS
+      run: |
+        cd OpenBLAS
+        echo "--- Building OpenBLAS from source (this takes ~5-10 minutes) ---"
+        make NO_SHARED=1 ONLY_CBLAS=1 NOFORTRAN=1 -j$(nproc)
+        echo "--- OpenBLAS build complete ---"
+        cd ..
+    
+    - name: Build Interface Tests
+      run: |
+        cd TestBlas
+        make clean
+        make all
+    
+    - name: Run Interface Tests
+      run: |
+        cd TestBlas
+        make run
+      continue-on-error: false
+    
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: interface-test-results
+        path: |
+          TestBlas/*.log
+          TestBlas/tests/*.log
+
+  # JOB 2: Performance Tests (сравнение my_gemm vs OpenBLAS)
+  performance-tests:
+    runs-on: ubuntu-latest
+    needs: interface-tests
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y g++ make gfortran
+    
+    - name: Build OpenBLAS
+      run: |
+        cd OpenBLAS
+        echo "--- Building OpenBLAS for performance tests ---"
+        make NO_SHARED=1 ONLY_CBLAS=1 NOFORTRAN=1 -j$(nproc)
+        cd ..
+    
+    - name: Build Performance Test
+      run: |
+        cd GemmTrpo
+        make clean
+        make all
+    
+    - name: Run Performance Test
+      run: |
+        cd GemmTrpo
+        make run
+      continue-on-error: false
+    
+    - name: Save performance results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: performance-results
+        path: |
+          GemmTrpo/*.log
+          GemmTrpo/performance_*.txt
+
+  # JOB 3: Final Status
+  final-status:
+    runs-on: ubuntu-latest
+    needs: [interface-tests, performance-tests]
+    if: always()
+    
+    steps:
+    - name: Check final status
+      run: |
+        echo "========================================="
+        echo "CI PIPELINE FINAL STATUS"
+        echo "========================================="
+        echo "Interface Tests: ${{ needs.interface-tests.result }}"
+        echo "Performance Tests: ${{ needs.performance-tests.result }}"
+        echo "========================================="
+        
+        if [ "${{ needs.interface-tests.result }}" == "success" ] && \
+           [ "${{ needs.performance-tests.result }}" == "success" ]; then
+          echo "SUCCESS - All tests passed!"
+          exit 0
+        else
+          echo "FAILED - Some tests failed!"
+          exit 1
+        fi
